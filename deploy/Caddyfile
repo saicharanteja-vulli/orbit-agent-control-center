@@ -1,0 +1,23 @@
+{
+    servers {
+        timeouts {
+            read_header 10s
+            read_body 30s
+            idle 2m
+        }
+    }
+}
+
+{$ORBIT_DOMAIN} {
+    request_body {
+        max_size 64KB
+    }
+    reverse_proxy api:8000 {
+        header_up X-Orbit-Client-IP {remote_host}
+        header_up -X-Forwarded-Host
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+}
