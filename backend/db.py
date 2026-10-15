@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import stat
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -8,9 +9,33 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def secure_storage(path):
+    # CONTROL_DB must live in a dedicated application data directory.
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError('Database must be a regular file.')
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    for suffix in ('-wal', '-shm', '-journal'):
+        sidecar = Path(str(path) + suffix)
+        try:
+            fd = os.open(sidecar, os.O_RDWR | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            continue
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+
+
 def connect():
     path = Path(os.environ.get('CONTROL_DB', 'data/control.db'))
-    path.parent.mkdir(parents=True, exist_ok=True)
+    secure_storage(path)
     db = sqlite3.connect(path, timeout=15)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')

@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tarfile
 import tempfile
+from .db import secure_storage
 
 
 def main():
@@ -24,13 +25,15 @@ def main():
                         if file.is_file() and not file.is_symlink():archive.add(file,arcname=str(file.relative_to(root)),recursive=False)
     else:
         if db.exists() or (root/'artifacts').exists():raise SystemExit('Restore requires an empty data volume. Keep the existing volume for rollback.')
-        root.mkdir(parents=True,exist_ok=True)
+        root.mkdir(parents=True,exist_ok=True,mode=0o700)
+        root.chmod(0o700)
         with tarfile.open(fileobj=sys.stdin.buffer,mode='r|gz') as archive:
             for item in archive:
                 path=Path(item.name)
                 if not item.isfile() or path.is_absolute() or '..' in path.parts or not (item.name=='control.db' or path.parts[0]=='artifacts'):
                     raise SystemExit('Unsafe archive entry.')
                 archive.extract(item,path=root,filter='data')
+        secure_storage(db)
         with sqlite3.connect(db) as conn:
             if conn.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise SystemExit('Database integrity check failed.')
             conn.execute('DELETE FROM sessions')
