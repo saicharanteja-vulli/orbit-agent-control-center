@@ -205,3 +205,7 @@ Validation: 54 tests passed after adding authentication, covering cross-user iso
 ## Online deployment candidate
 
 See [deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md) for the current single-server deployment package, public signup, production safeguards, backup/restore and required server preflight. Local mode remains the default. The earlier local-only notes describe the development setup; production mode must use the supplied HTTPS reverse proxy and private networking. No hosting has been provisioned.
+
+### Private data directory
+
+Set `CONTROL_DB` inside a dedicated Orbit data directory, never directly inside a shared project folder or home directory. Orbit restricts that directory to owner-only access (0700), and its database and SQLite sidecars to 0600. Existing storage is hardened on connection; restored backups are hardened before use. This protects local file access but does not encrypt credentials at rest.
