@@ -35,7 +35,7 @@ From this folder:
 ./start.sh
 ```
 
-Open **http://127.0.0.1:8000**. The script starts the API and worker. The current workspace also contains a local Ollama runtime and Qwen3 models; the launch script starts that runtime if needed. On another machine, install Ollama separately and run `ollama pull qwen3:1.7b`.
+Open **http://127.0.0.1:8000**. The script starts the API and worker. Install and start Ollama separately, then run `ollama pull qwen3:1.7b` for general agent tasks. See the document research guide for optional embedding and larger-model setup. Models and private runtime data are not included in the source package.
 
 Prerequisites for a fresh checkout: Python 3.11+ on macOS/Linux and Node.js 20.19+ or 22.12+. First launch installs Python packages and builds the frontend if necessary. Windows requires replacing the worker's Unix file lock; WSL is supported.
 

@@ -150,6 +150,17 @@ def test_ingestion_limits_and_unknown_fields(users):
     assert owner.post('/api/documents', json={'title': 'Over quota', 'text': TEXT+'extra'}).status_code == 429
 
 
+def test_source_whitespace_and_line_numbers_are_preserved(users):
+    owner, _ = users
+    original = '\n\n' + TEXT + '\n'
+    identifier = add(owner, original)
+    source = owner.get('/api/documents/'+identifier).json()
+    assert source['text'] == original
+    hit = source['chunks'][0]
+    assert hit['text'] == original[hit['start']:hit['end']]
+    assert hit['line_start'] == 1 and hit['line_end'] == 4
+
+
 def test_research_inputs_validation(users, monkeypatch):
     owner, _ = users; identifier = add(owner)
     for overrides in [{'mode': 'demo'}, {'enabled_tools': ['web_search']}, {'document_ids': []},

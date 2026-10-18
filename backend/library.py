@@ -20,8 +20,9 @@ class DocumentInput(BaseModel):
     def clean(cls, value, info):
         if not value.strip() or '\x00' in value:
             raise ValueError('Provide readable text without null characters.')
-        value = value.strip()
-        if info.field_name == 'text' and len(value) < 50:
+        if info.field_name == 'title':
+            value = value.strip()
+        if info.field_name == 'text' and len(value.strip()) < 50:
             raise ValueError('Document text requires at least 50 non-padding characters.')
         try:
             value.encode('utf-8')
