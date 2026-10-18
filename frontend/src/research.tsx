@@ -12,7 +12,7 @@ export function DocumentLibrary({user,onLaunch}:{user:User;onLaunch:(run:any)=>v
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[preview,setPreview]=useState<any>(null);
  const writable=user.role!=='viewer';
  async function refresh(){const rows=await api('/documents');setDocuments(rows);setSelected(ids=>ids.filter(id=>rows.some((d:Document)=>d.id===id)));}
- useEffect(()=>{refresh().catch(e=>setError(e.message));api('/models').then(data=>{setModels(data.models);setModel(['qwen3:4b','qwen3:1.7b'].find(name=>data.models.includes(name))||data.models[0]||'');}).catch(e=>setError(e.message));api('/research/config').then(data=>setStrategies(data.strategies)).catch(e=>setError(e.message));},[]);
+ useEffect(()=>{refresh().catch(e=>setError(e.message));api('/models').then(data=>{setModels(data.models);setModel(['qwen3:1.7b'].find(name=>data.models.includes(name))||data.models[0]||'');}).catch(e=>setError(e.message));api('/research/config').then(data=>setStrategies(data.strategies)).catch(e=>setError(e.message));},[]);
  async function add(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{
   const doc=await api('/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,text})});
   await refresh();setSelected(ids=>Array.from(new Set([...ids,doc.id])));setTitle('');setText('');setMessage('Document saved privately and selected for research.');
