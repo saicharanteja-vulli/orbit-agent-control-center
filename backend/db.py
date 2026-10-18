@@ -14,23 +14,29 @@ def secure_storage(path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.parent.chmod(0o700)
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    # Never open/close an existing SQLite file behind SQLite's back. POSIX close()
+    # can release this process's locks held through other database connections.
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise ValueError('Database must be a regular file.')
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError('Database must be a regular file, not a symbolic link.')
+        path.chmod(0o600, follow_symlinks=False)
+    else:
         os.fchmod(fd, 0o600)
-    finally:
         os.close(fd)
     for suffix in ('-wal', '-shm', '-journal'):
         sidecar = Path(str(path) + suffix)
         try:
-            fd = os.open(sidecar, os.O_RDWR | os.O_NOFOLLOW)
+            mode = sidecar.lstat().st_mode
         except FileNotFoundError:
             continue
+        if not stat.S_ISREG(mode):
+            raise ValueError('Database sidecars must be regular files.')
         try:
-            os.fchmod(fd, 0o600)
-        finally:
-            os.close(fd)
+            sidecar.chmod(0o600, follow_symlinks=False)
+        except FileNotFoundError:
+            pass  # SQLite may remove a sidecar between lstat and chmod.
 
 
 def connect():
@@ -87,6 +93,16 @@ def init():
             UNIQUE(run_id,sequence)
         );
         CREATE INDEX IF NOT EXISTS actions_run ON actions(run_id,sequence);
+        CREATE TABLE IF NOT EXISTS documents (
+            id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+            title TEXT NOT NULL, text TEXT NOT NULL, sha256 TEXT NOT NULL,
+            created_at TEXT NOT NULL, UNIQUE(owner_id,sha256)
+        );
+        CREATE INDEX IF NOT EXISTS documents_owner ON documents(owner_id);
+        CREATE TABLE IF NOT EXISTS research_inputs (
+            run_id TEXT PRIMARY KEY REFERENCES runs(id), snapshot TEXT NOT NULL,
+            strategy TEXT NOT NULL, embedding_model TEXT
+        );
         CREATE TRIGGER IF NOT EXISTS immutable_action_arguments
         BEFORE UPDATE OF tool, arguments, digest, requires_approval, run_id, sequence ON actions
         BEGIN SELECT RAISE(ABORT, 'Tool proposal is immutable'); END;

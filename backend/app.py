@@ -15,6 +15,7 @@ from .db import connect, init, event, now
 
 from .deployment import production, public_origin, validate_config, BodyLimit
 from .auth import router as auth_router, current_user, session
+from .library import router as library_router, snapshot
 
 OLLAMA = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434')
 
@@ -28,6 +29,7 @@ async def lifespan(app):
 
 app = FastAPI(title='Orbit Agent Control Center', lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(BodyLimit)
+app.include_router(library_router)
 
 
 @app.middleware('http')
@@ -97,6 +99,9 @@ class TaskInput(BaseModel):
     model: str = Field(default='', max_length=120)
     approval_required: bool = True
     enabled_tools: list[Literal['web_search', 'read_webpage', 'save_file', 'send_webhook']] = Field(default_factory=list, max_length=4)
+    document_ids: list[str] = Field(default_factory=list, max_length=30)
+    research_mode: bool = False
+    retrieval_strategy: Literal['bm25', 'dense', 'hybrid'] = 'bm25'
 
     @field_validator('task')
     @classmethod
@@ -122,9 +127,15 @@ def models():
     try:
         response = httpx.get(OLLAMA + '/api/tags', timeout=2)
         response.raise_for_status()
-        return {'models': [m['name'] for m in response.json()['models']], 'available': True}
+        return {'models': [m['name'] for m in response.json()['models'] if not m.get('capabilities') or 'completion' in m['capabilities']], 'available': True}
     except (httpx.HTTPError, KeyError, ValueError):
         return {'models': [], 'available': False}
+
+
+@app.get('/api/research/config')
+def research_config():
+    model = os.environ.get('ORBIT_EMBEDDING_MODEL', '')
+    return {'embedding_model': model or None, 'strategies': ['bm25', 'dense', 'hybrid'] if model else ['bm25']}
 
 
 @app.get('/api/agents')
@@ -158,6 +169,13 @@ def create_run(body, parent_id=None):
     if not owner: raise HTTPException(401, 'Sign in to continue.')
     if 'send_webhook' in body.enabled_tools and owner['role']!='admin':
         raise HTTPException(403, 'Only administrators may use the shared webhook.')
+    if body.research_mode and (body.mode != 'ollama' or body.enabled_tools):
+        raise HTTPException(400, 'Document research requires Ollama with external tools disabled.')
+    if body.document_ids and not body.research_mode:
+        raise HTTPException(400, 'Selected documents require document research mode.')
+    embedding_model = os.environ.get('ORBIT_EMBEDDING_MODEL', '')
+    if body.research_mode and body.retrieval_strategy != 'bm25' and not embedding_model:
+        raise HTTPException(400, 'An embedding model must be configured for semantic or hybrid retrieval.')
     with connect() as db:
         configured = db.execute('SELECT enabled FROM agents WHERE id=?', (body.agent,)).fetchone()
         if not configured or not configured['enabled']:
@@ -169,6 +187,7 @@ def create_run(body, parent_id=None):
     run_id, stamp = str(uuid4()), now()
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        source_snapshot = snapshot(db, owner['id'], body.document_ids) if body.research_mode else None
         if production():
             counts=db.execute("SELECT COUNT(*) total,SUM(status IN ('queued','running','awaiting_approval')) active,SUM(created_at>=?) daily FROM runs WHERE owner_id=?",(datetime.now(timezone.utc).date().isoformat(),owner['id'])).fetchone()
             global_pending=db.execute("SELECT COUNT(*) FROM runs WHERE status IN ('queued','running')").fetchone()[0]
@@ -177,6 +196,10 @@ def create_run(body, parent_id=None):
         db.execute('INSERT INTO runs(id,task,status,created_at,updated_at,agent,mode,model,approval_required,parent_id,enabled_tools,owner_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                    (run_id, body.task, 'queued', stamp, stamp, body.agent, body.mode, body.model, int(body.approval_required), parent_id, json.dumps(list(dict.fromkeys(body.enabled_tools))), owner['id']))
         event(db, run_id, 'queued', 'Task saved. Waiting for the worker.' if not parent_id else 'New attempt queued; original history preserved.')
+        if source_snapshot is not None:
+            db.execute('INSERT INTO research_inputs VALUES(?,?,?,?)',
+                       (run_id, json.dumps(source_snapshot), body.retrieval_strategy, embedding_model))
+            event(db, run_id, 'documents_snapshotted', f'{len(source_snapshot)} private documents captured for reproducible research.')
     return detail(run_id)
 
 
@@ -201,6 +224,10 @@ def detail(run_id: str):
         result['events'] = [dict(e) for e in db.execute('SELECT * FROM events WHERE run_id=? ORDER BY id', (run_id,))]
         result['actions'] = [dict(a) for a in db.execute('SELECT * FROM actions WHERE run_id=? ORDER BY sequence', (run_id,))]
         result.pop('checkpoint', None)
+        research = db.execute('SELECT snapshot,strategy FROM research_inputs WHERE run_id=?', (run_id,)).fetchone()
+        if research:
+            result['research'] = {'strategy': research['strategy'], 'documents': [
+                {k: doc[k] for k in ('id', 'title', 'sha256')} for doc in json.loads(research['snapshot'])]}
         return result
 
 
@@ -253,6 +280,13 @@ def retry(run_id: str):
     old['enabled_tools'] = json.loads(old.get('enabled_tools') or '[]')
     if old['status'] in {'queued', 'running', 'awaiting_approval'}:
         raise HTTPException(409, 'Finish or cancel the current attempt first.')
+    if old.get('research'):
+        # Retrying resolves current owned documents; deleted inputs cannot be silently reused.
+        old.update(research_mode=True, document_ids=[d['id'] for d in old['research']['documents']],
+                   retrieval_strategy=old['research']['strategy'])
+    for key, field in TaskInput.model_fields.items():
+        if key not in old:
+            old[key] = field.get_default(call_default_factory=True)
     return create_run(TaskInput(**{k: old[k] for k in TaskInput.model_fields}), parent_id=run_id)
 
 
@@ -263,6 +297,16 @@ def export(run_id: str):
         raise HTTPException(403, 'Report export requires a completed, approved run.')
     result = json.loads(run['result'])
     report = f"# {result['title']}\n\nTask: {run['task']}\n\n{result.get('output', result.get('summary', ''))}\n\n"
+    if result.get('retrieval'):
+        report += '## Supporting evidence\n\n'
+        sources = {hit['source_id']: hit for hit in result['evidence']}
+        for index, item in enumerate(result['claims'], 1):
+            report += f"### Claim {index}\n\n{item['text']}\n\n"
+            for citation in item['citations']:
+                source = sources[citation['source_id']]
+                report += f"[{citation['source_id']}] {source['title']} (lines {source['line_start']}-{source['line_end']})\n\n"
+                report += '\n'.join('> ' + line for line in citation['quote'].splitlines()) + '\n\n'
+        report += result['provenance_notice'] + '\n\n'
     report += '\n'.join('- ' + s for s in result.get('next_steps', []))
     return Response(report, media_type='text/markdown', headers={'Content-Disposition': f'attachment; filename="orbit-{run_id[:8]}.md"'})
 

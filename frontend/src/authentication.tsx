@@ -3,7 +3,7 @@ export type User={id:string;username:string;role:'admin'|'member'|'viewer';activ
 let csrf='';
 export async function api(path:string,init?:RequestInit){
  const headers=new Headers(init?.headers);headers.set('X-Orbit-Request','1');if(csrf)headers.set('X-Orbit-CSRF',csrf);
- const r=await fetch('/api'+path,{...init,headers,credentials:'same-origin'});const data=await r.json();
+ const r=await fetch('/api'+path,{...init,headers,credentials:'same-origin'});const data=r.status===204?null:await r.json();
  if(!r.ok){if(r.status===401)window.dispatchEvent(new Event('orbit-signed-out'));throw new Error(typeof data.detail==='string'?data.detail:'Check your input and try again.');}return data;
 }
 export function Authentication({children}:{children:(user:User,logout:()=>void,account:()=>void)=>React.ReactNode}){
