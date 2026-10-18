@@ -2,13 +2,30 @@
 
 Research → sourced report → your approval → delivery.
 
-Orbit is a student-built AI agent workspace with local Ollama execution, web research tools, per-user task history, and approval-gated file creation and webhook delivery. Built with AI-assisted development and verified with automated tests and live workflow checks.
+Orbit is a local-first AI agent workspace with local Ollama execution, web research tools, per-user task history, and approval-gated file creation and webhook delivery. Built with AI-assisted development and verified with automated tests and live workflow checks.
 
 **Status: working demo / single-server beta.** Not an independently audited production service.
 
-[Temporary live demo](https://lenders-struck-essays-honest.trycloudflare.com) — create a member account to try it. Available only while the host Mac is awake and the tunnel runs; the URL may expire. Never submit sensitive information to a public demo.
+Run locally using the instructions below. No persistent public demo is provisioned.
 
 **Stack:** React + TypeScript + Vite · FastAPI · SQLite · separate Python worker · Ollama · Docker/Caddy deployment package.
+
+## Document research and evaluation
+
+The **Documents** workspace adds private text/Markdown ingestion, BM25 keyword search,
+local dense embeddings, reciprocal-rank fusion, source-cited answers and explicit abstention.
+Each answer exposes its passages, exact supporting quotes, source lines, timings and token usage.
+Documents are captured per run; evidence survives source removal for audit. Exports include
+quotes and remain approval-gated by default. Account ownership is enforced on both input and output.
+
+The versioned evaluation suite contains **18 fictional source documents and 40 questions**
+(10 development, 30 test), including paraphrases, multi-source questions, outdated policies,
+unanswerable questions, false premises and prompt injection. It compares keyword, semantic
+and combined retrieval, retains every failure and includes local-model experiments.
+
+See [the research guide](docs/DOCUMENT_RESEARCH.md), [evaluation methodology](evaluation/README.md)
+and [benchmark results](evaluation/results/). These are small diagnostic experiments,
+not production accuracy claims. Exact quote validation establishes provenance, not entailment.
 
 ## Start
 
@@ -18,7 +35,7 @@ From this folder:
 ./start.sh
 ```
 
-Open **http://127.0.0.1:8000**. The script starts the API and worker. The current workspace also contains a local Ollama runtime and Qwen3 models; the launch script starts that runtime if needed. On another machine, install Ollama separately and run `ollama pull qwen3:1.7b`.
+Open **http://127.0.0.1:8000**. The script starts the API and worker. Install and start Ollama separately, then run `ollama pull qwen3:1.7b` for general agent tasks. See the document research guide for optional embedding and larger-model setup. Models and private runtime data are not included in the source package.
 
 Prerequisites for a fresh checkout: Python 3.11+ on macOS/Linux and Node.js 20.19+ or 22.12+. First launch installs Python packages and builds the frontend if necessary. Windows requires replacing the worker's Unix file lock; WSL is supported.
 
@@ -76,7 +93,7 @@ The agent loop checkpoints messages and tool actions in SQLite, allows at most e
 
 ## Local deployment limits
 
-This is a single-user, loopback-only application, not a public multi-tenant service. Host and mutation-Origin checks are not a substitute for authentication on a shared/public deployment. Do not bind it to 0.0.0.0 without authentication, authorization, TLS, and deployment hardening.
+This is a single-server application with per-account ownership and a SQLite queue. Local mode binds to loopback by default. For public deployment use the supplied authentication, TLS reverse proxy and deployment safeguards; it has not been independently audited.
 
 Queue pause and agent disable affect future claims, not already-running work. The model has bounded generation and execution limits. Small local models can choose incorrect tools or generate inaccurate content; all actual tool outcomes remain visible in the audit history.
 
@@ -92,7 +109,7 @@ FastAPI API + SSE ---- SQLite (WAL)
                  Ollama local model → allowlisted tools → approval gate for writes
 ```
 
-SQLite keeps setup simple and persists across restarts. A future multi-worker deployment should migrate the queue and records to PostgreSQL and introduce authenticated users.
+SQLite keeps setup simple and persists across restarts. A future multi-worker deployment should migrate the queue and records to PostgreSQL. User authentication and per-account ownership are implemented.
 
 ## Project layout
 
@@ -151,7 +168,7 @@ Interactive API documentation: **http://127.0.0.1:8000/docs**.
 
 ## Next engineering steps
 
-User accounts and authorization, PostgreSQL migration, streaming partial output, richer usage analytics, scheduled jobs, and multi-worker execution are separate extensions. They are not represented as implemented features.
+PostgreSQL migration, streaming partial output, richer usage analytics, scheduled jobs and multi-worker execution remain separate extensions. User accounts, authorization and document research are implemented.
 
 ## Verified build
 

@@ -13,5 +13,6 @@ jobs:
           node-version: '22'
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
+      - run: python -m evaluation.run --split test --strategies bm25 --output evaluation/results/ci-retrieval
       - run: npm ci && npm run build
         working-directory: frontend

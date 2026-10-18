@@ -55,6 +55,17 @@ def process(run, delay=0.8):
         time.sleep(delay)
         if not alive(run['id']):
             return
+        with connect() as db:
+            research = db.execute('SELECT * FROM research_inputs WHERE run_id=?', (run['id'],)).fetchone()
+        if research:
+            from .document_qa import Ollama, answer_question
+            progress(run['id'], 'Retrieving private document passages and checking answer citations.')
+            provider = Ollama(run['model'], research['embedding_model'])
+            result = answer_question(json.loads(research['snapshot']), run['task'], provider, research['strategy'])
+            result['usage']['embedding_requests'] = provider.embedding_requests
+            result['usage']['embedding_tokens'] = provider.embedding_tokens
+            finish(run, result, result['usage']['prompt_tokens'] + result['usage']['completion_tokens'])
+            return
         if run['mode'] == 'ollama' and json.loads(run.get('enabled_tools') or '[]'):
             from .agent_runtime import run_agent
             outcome = run_agent(run)

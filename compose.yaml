@@ -22,6 +22,7 @@ x-app: &app
     ORBIT_MAX_USERS: ${ORBIT_MAX_USERS:-100}
     CONTROL_DB: /data/control.db
     OLLAMA_URL: http://ollama:11434
+    ORBIT_EMBEDDING_MODEL: ${ORBIT_EMBEDDING_MODEL:-}
   networks: [backend]
 services:
   caddy:
