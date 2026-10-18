@@ -1,0 +1,2 @@
+# Raw evaluation records are generated evidence, not hand-written source code.
+evaluation/results/*.json linguist-generated=true
